@@ -48,3 +48,10 @@ pytest -v
 python -m polymkt.init_db  # creates the schema on the dev database
 python -m polymkt.run
 ```
+
+For an existing development database created before Smart Money scoring, apply
+the versioned schema migration once:
+
+```bash
+docker compose exec -T db psql -U postgres -d polymkt < db/migrations/002_add_smart_money_scoring.sql
+```

@@ -71,9 +71,11 @@ Tabla nueva `smart_money_scores`, siguiendo el patrón **append-only** de `trade
 
 ## Integración con el scheduler
 
-Se añade un quinto job al scheduler existente (`src/polymkt/run.py`), con la misma cadencia que `position_ingestion` (20 minutos), ya que el Smart Money Signal solo cambia cuando cambian las posiciones de los top traders — recalcularlo a la cadencia de precios (3 min) no aportaría información nueva.
+El scoring se encadena al job existente de `position_ingestion` (20 minutos), inmediatamente después de persistir las posiciones y dentro de la misma transacción. El Smart Money Signal solo cambia cuando cambian esas posiciones, y este encadenamiento evita que dos jobs concurrentes calculen contra ciclos distintos.
 
-Sigue el mismo patrón que los cuatro jobs existentes: función `run_smart_money_scoring()` que abre `get_session()`, llama al cálculo, y registra el número de filas escritas vía logging. A diferencia de los jobs de ingesta, este no necesita cliente HTTP (solo lee y escribe en la base de datos), por lo que no hay bloque `try/finally` de cierre de cliente.
+`run_smart_money_scoring()` queda disponible para ejecución manual, pero el scheduler llama al cálculo desde `run_position_ingestion()` tras el `flush` de posiciones. Si la ingesta o el scoring falla, la transacción completa se revierte y no queda un score desincronizado.
+
+Cada ingesta registra además un lote en `position_ingestion_batches`, incluso cuando ningún trader tiene posiciones. Así un ciclo vacío reemplaza correctamente la cobertura anterior en vez de reutilizar para siempre el último lote no vacío.
 
 ## Testing
 

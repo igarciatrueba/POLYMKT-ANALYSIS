@@ -13,7 +13,7 @@
 - Work only on `worktree-smart-money-scoring`; never commit or push directly to `main`.
 - Follow strict TDD: add one failing behavior test, run it and observe the expected failure, then add the minimum production code.
 - Use only the latest `TraderRanking` snapshot for the configured `category` and `time_period`, ordered by rank and limited to `top_n`.
-- Use only the globally latest `Position` snapshot. Historical rows must never inflate current capital.
+- Use only the latest completed `PositionIngestionBatch`, including an explicitly recorded empty batch. Historical rows must never inflate or leak into current capital.
 - Score only active known binary markets and the exact outcomes `"Yes"` and `"No"`.
 - Persist coverage-zero rows, use one `captured_at` value per execution, and never upsert historical scores.
 - Normalize with `capital_usd / max_capital_in_batch * 100`; if the maximum is zero, every score is zero.
@@ -169,21 +169,21 @@ git commit -m "feat: normalize smart money scores"
 - Modify: `tests/test_run.py`
 
 **Interfaces:**
-- Produces: `run_smart_money_scoring() -> None` and scheduler job `smart_money_scoring` at a 20-minute interval.
+- Produces: `run_smart_money_scoring() -> None` for manual execution and atomic scoring from the scheduled `position_ingestion` job every 20 minutes.
 
-- [ ] **Step 1: Extend the scheduler test first**
+- [ ] **Step 1: Extend the scheduler and sequencing tests first**
 
-Require the `smart_money_scoring` job and assert its interval is `20 * 60` seconds.
+Require `position_ingestion` to remain at `20 * 60` seconds and assert that it calls scoring only after position ingestion completes.
 
 - [ ] **Step 2: Verify the scheduler test fails**
 
 Run: `.venv/bin/pytest tests/test_run.py -v`
 
-Expected: FAIL because the fifth job is absent.
+Expected: FAIL because position ingestion does not yet call scoring.
 
 - [ ] **Step 3: Add the runner and scheduler job**
 
-Import `calculate_smart_money_scores`. Add `run_smart_money_scoring()` using `get_session()` and configured top-N/category/time period, log the row count, and register it at 20 minutes. Do not create an HTTP client.
+Import `calculate_smart_money_scores`. Add `run_smart_money_scoring()` for manual execution, and call the service from `run_position_ingestion()` after its position flush using the same session and configured cohort. Do not register an independent concurrent job or create another HTTP client.
 
 - [ ] **Step 4: Add and verify a runner interaction test**
 

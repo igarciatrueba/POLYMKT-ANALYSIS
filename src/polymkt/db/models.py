@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -38,6 +38,13 @@ class TraderRanking(Base):
             "wallet_address", "time_period", "category", "captured_at",
             name="uq_trader_ranking_snapshot",
         ),
+        Index(
+            "ix_trader_rankings_cohort_snapshot",
+            "category",
+            "time_period",
+            "captured_at",
+            "rank",
+        ),
     )
 
 
@@ -51,6 +58,16 @@ class Position(Base):
     size: Mapped[float] = mapped_column(Numeric(18, 6), nullable=False)
     value_usd: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_positions_snapshot_wallet_market",
+            "captured_at",
+            "wallet_address",
+            "condition_id",
+            "outcome",
+        ),
+    )
 
 
 class PositionIngestionBatch(Base):
@@ -85,3 +102,12 @@ class SmartMoneyScore(Base):
     has_coverage: Mapped[bool] = mapped_column(Boolean, nullable=False)
     trader_count: Mapped[int] = mapped_column(nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_smart_money_scores_snapshot_market",
+            "captured_at",
+            "condition_id",
+            "outcome",
+        ),
+    )

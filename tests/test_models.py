@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 from polymkt.db.models import (
@@ -102,6 +103,22 @@ def test_smart_money_score_round_trip(db_session):
     assert score.has_coverage is True
     assert score.trader_count == 3
     assert score.captured_at == captured_at
+
+
+def test_snapshot_query_indexes_exist(db_session):
+    inspector = inspect(db_session.bind)
+
+    ranking_indexes = {
+        index["name"] for index in inspector.get_indexes("trader_rankings")
+    }
+    position_indexes = {index["name"] for index in inspector.get_indexes("positions")}
+    score_indexes = {
+        index["name"] for index in inspector.get_indexes("smart_money_scores")
+    }
+
+    assert "ix_trader_rankings_cohort_snapshot" in ranking_indexes
+    assert "ix_positions_snapshot_wallet_market" in position_indexes
+    assert "ix_smart_money_scores_snapshot_market" in score_indexes
 
 
 def test_trader_ranking_unique_constraint_violation(db_session):
