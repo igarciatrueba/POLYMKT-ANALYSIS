@@ -29,5 +29,6 @@ def db_session(engine):
     session = session_factory()
     yield session
     session.close()
-    transaction.rollback()
+    if transaction.is_active:
+        transaction.rollback()
     connection.close()

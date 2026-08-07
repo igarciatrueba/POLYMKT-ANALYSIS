@@ -1,5 +1,10 @@
+import pytest
+
 from polymkt.db.models import TraderRanking
-from polymkt.ingestion.leaderboard import ingest_leaderboard
+from polymkt.ingestion.leaderboard import (
+    IncompleteLeaderboardSnapshotError,
+    ingest_leaderboard,
+)
 
 
 class FakeDataApiClient:
@@ -35,3 +40,39 @@ def test_ingest_leaderboard_stops_once_top_n_reached_across_pages(db_session):
     count = ingest_leaderboard(db_session, client, top_n=60, category="OVERALL", time_period="ALL")
 
     assert count == 60
+
+
+def test_ingest_leaderboard_rejects_a_partial_snapshot(db_session):
+    page = [
+        {"rank": str(i), "proxyWallet": f"0x{i}", "pnl": 100.0, "vol": 10.0}
+        for i in range(1, 51)
+    ]
+    client = FakeDataApiClient(pages=[page, []])
+
+    with pytest.raises(IncompleteLeaderboardSnapshotError, match="50 of 60"):
+        ingest_leaderboard(
+            db_session,
+            client,
+            top_n=60,
+            category="OVERALL",
+            time_period="ALL",
+        )
+
+    assert db_session.query(TraderRanking).count() == 0
+
+
+def test_ingest_leaderboard_rejects_duplicate_or_non_contiguous_ranks(db_session):
+    page = [
+        {"rank": "1", "proxyWallet": "0x111", "pnl": 100.0, "vol": 10.0},
+        {"rank": "1", "proxyWallet": "0x222", "pnl": 90.0, "vol": 9.0},
+    ]
+    client = FakeDataApiClient(pages=[page])
+
+    with pytest.raises(IncompleteLeaderboardSnapshotError, match="ranks"):
+        ingest_leaderboard(
+            db_session,
+            client,
+            top_n=2,
+            category="OVERALL",
+            time_period="ALL",
+        )

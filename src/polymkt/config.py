@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -5,7 +6,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/polymkt"
-    top_n_traders: int = 300
+    top_n_traders: int = Field(default=300, ge=1, le=1000)
     leaderboard_category: str = "OVERALL"
     leaderboard_time_period: str = "ALL"
     gamma_base_url: str = "https://gamma-api.polymarket.com"

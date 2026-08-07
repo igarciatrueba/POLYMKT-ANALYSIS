@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from polymkt.db.models import Market, MarketPriceSnapshot
+from polymkt.domain import NO_OUTCOME, YES_OUTCOME
 
 BATCH_SIZE = 500
 
@@ -27,9 +28,15 @@ def ingest_prices(session: Session, client) -> int:
     token_id_to_market_outcome: dict[str, tuple[str, str]] = {}
     for market in markets:
         if market.token_id_yes:
-            token_id_to_market_outcome[market.token_id_yes] = (market.condition_id, "Yes")
+            token_id_to_market_outcome[market.token_id_yes] = (
+                market.condition_id,
+                YES_OUTCOME,
+            )
         if market.token_id_no:
-            token_id_to_market_outcome[market.token_id_no] = (market.condition_id, "No")
+            token_id_to_market_outcome[market.token_id_no] = (
+                market.condition_id,
+                NO_OUTCOME,
+            )
 
     token_ids = list(token_id_to_market_outcome.keys())
     if not token_ids:

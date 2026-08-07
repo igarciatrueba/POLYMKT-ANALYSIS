@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Numeric, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -38,6 +47,13 @@ class TraderRanking(Base):
             "wallet_address", "time_period", "category", "captured_at",
             name="uq_trader_ranking_snapshot",
         ),
+        Index(
+            "ix_trader_rankings_cohort_snapshot",
+            "category",
+            "time_period",
+            "captured_at",
+            "rank",
+        ),
     )
 
 
@@ -52,6 +68,41 @@ class Position(Base):
     value_usd: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    __table_args__ = (
+        Index(
+            "ix_positions_snapshot_wallet_market",
+            "captured_at",
+            "wallet_address",
+            "condition_id",
+            "outcome",
+        ),
+    )
+
+
+class PositionIngestionBatch(Base):
+    __tablename__ = "position_ingestion_batches"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), unique=True, nullable=False
+    )
+    leaderboard_captured_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    time_period: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    top_n: Mapped[int | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_position_batches_cohort_snapshot",
+            "category",
+            "time_period",
+            "top_n",
+            "captured_at",
+        ),
+    )
+
 
 class MarketPriceSnapshot(Base):
     __tablename__ = "market_price_snapshots"
@@ -63,3 +114,38 @@ class MarketPriceSnapshot(Base):
     best_bid: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
     best_ask: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SmartMoneyScore(Base):
+    __tablename__ = "smart_money_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    condition_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    capital_usd: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    score: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    has_coverage: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    trader_count: Mapped[int] = mapped_column(nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    position_ingestion_batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("position_ingestion_batches.id"), nullable=True
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_smart_money_scores_snapshot_market",
+            "captured_at",
+            "condition_id",
+            "outcome",
+        ),
+        Index(
+            "ix_smart_money_scores_position_batch",
+            "position_ingestion_batch_id",
+        ),
+        UniqueConstraint(
+            "position_ingestion_batch_id",
+            "condition_id",
+            "outcome",
+            name="uq_smart_money_score_position_batch_market",
+        ),
+    )

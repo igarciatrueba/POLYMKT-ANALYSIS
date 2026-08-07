@@ -1,9 +1,17 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
-from polymkt.db.models import Market, MarketPriceSnapshot, Position, TraderRanking
+from polymkt.db.models import (
+    Market,
+    MarketPriceSnapshot,
+    Position,
+    SmartMoneyScore,
+    TraderRanking,
+)
 
 
 def test_market_round_trip(db_session):
@@ -70,6 +78,47 @@ def test_position_and_price_snapshot_round_trip(db_session):
 
     assert db_session.query(Position).count() == 1
     assert db_session.query(MarketPriceSnapshot).count() == 1
+
+
+def test_smart_money_score_round_trip(db_session):
+    captured_at = datetime.now(timezone.utc)
+    db_session.add(
+        SmartMoneyScore(
+            condition_id="0xabc",
+            outcome="Yes",
+            capital_usd=Decimal("1250.50"),
+            score=Decimal("82.75"),
+            has_coverage=True,
+            trader_count=3,
+            captured_at=captured_at,
+        )
+    )
+    db_session.flush()
+
+    score = db_session.query(SmartMoneyScore).one()
+    assert score.condition_id == "0xabc"
+    assert score.outcome == "Yes"
+    assert score.capital_usd == Decimal("1250.50")
+    assert score.score == Decimal("82.75")
+    assert score.has_coverage is True
+    assert score.trader_count == 3
+    assert score.captured_at == captured_at
+
+
+def test_snapshot_query_indexes_exist(db_session):
+    inspector = inspect(db_session.bind)
+
+    ranking_indexes = {
+        index["name"] for index in inspector.get_indexes("trader_rankings")
+    }
+    position_indexes = {index["name"] for index in inspector.get_indexes("positions")}
+    score_indexes = {
+        index["name"] for index in inspector.get_indexes("smart_money_scores")
+    }
+
+    assert "ix_trader_rankings_cohort_snapshot" in ranking_indexes
+    assert "ix_positions_snapshot_wallet_market" in position_indexes
+    assert "ix_smart_money_scores_snapshot_market" in score_indexes
 
 
 def test_trader_ranking_unique_constraint_violation(db_session):
