@@ -16,8 +16,8 @@ Para cada mercado y lado:
 
 ```
 capital_lado = Σ value_usd  de las posiciones que cumplen:
-                 - pertenecen al snapshot más reciente de `positions` (captured_at == max)
-                 - su wallet_address está en el cohorte top-N más reciente de `trader_rankings`
+                 - pertenecen al último `PositionIngestionBatch` completado para category/time_period/top_n
+                 - su wallet_address está en el `leaderboard_captured_at` fijado por ese lote
                  - su condition_id existe en `markets` y está activo
                  - su outcome coincide exactamente con el string literal del lado ("Yes" / "No")
 
@@ -41,9 +41,14 @@ Tanto `positions` como `trader_rankings` son tablas **append-only**: cada ciclo 
 
 Por tanto, una consulta ingenua del tipo `SELECT ... FROM positions WHERE condition_id = X` sumaría **todos los snapshots jamás tomados**, inflando el capital proporcionalmente al número de ciclos ejecutados. Este es exactamente el defecto que la revisión final de Fase 1 detectó en `ingest_positions_for_top_traders` y que se corrigió allí.
 
-El cálculo debe filtrar explícitamente por `captured_at == (SELECT max(captured_at) FROM positions)`.
+El cálculo filtra por el `captured_at` del último lote completo que coincide con la
+configuración solicitada. Un lote vacío es válido y reemplaza la cobertura anterior;
+la ausencia de lote o de leaderboard es un error de fuente y no se publica como ceros.
 
-**Fuente autoritativa del cohorte**: el conjunto de wallets se determina por el snapshot más reciente de `trader_rankings` (filtrado por `category` y `time_period` de la configuración, ordenado por `rank`, limitado a `settings.top_n_traders`) — exactamente la misma lógica que ya usa `ingest_positions_for_top_traders`. Por construcción ambos conjuntos coinciden, pero `trader_rankings` es la fuente de verdad para evitar que el implementador invente un join distinto.
+**Fuente autoritativa del cohorte**: `position_ingestion_batches` conserva
+`leaderboard_captured_at`, `category`, `time_period` y `top_n`. El scoring vuelve a
+leer las wallets del timestamp fijado en el lote, no del leaderboard más reciente,
+por lo que un refresco concurrente no puede mezclar cohortes.
 
 ## Alcance y exclusiones
 
@@ -65,7 +70,8 @@ Tabla nueva `smart_money_scores`, siguiendo el patrón **append-only** de `trade
 | `score` | Numeric(6,2), not null | 0-100 normalizado |
 | `has_coverage` | Boolean, not null | False cuando ningún top trader está posicionado |
 | `trader_count` | Integer, not null | Cuántos top traders distintos están en ese lado |
-| `captured_at` | DateTime(timezone=True), not null | Un único valor por ejecución del cálculo |
+| `captured_at` | DateTime(timezone=True), not null | Timestamp del lote de posiciones fuente |
+| `position_ingestion_batch_id` | BigInteger, FK | Linaje auditable al lote de posiciones exacto |
 
 `trader_count` no es estrictamente necesario para la fórmula (que pondera por capital, no por conteo), pero es información valiosa para el frontend (la vista de detalle por mercado del diseño muestra "qué top traders están posicionados y con cuánto capital") y para diagnosticar si un score alto viene de una sola ballena o de consenso amplio.
 
@@ -75,7 +81,12 @@ El scoring se encadena al job existente de `position_ingestion` (20 minutos), in
 
 `run_smart_money_scoring()` queda disponible para ejecución manual, pero el scheduler llama al cálculo desde `run_position_ingestion()` tras el `flush` de posiciones. Si la ingesta o el scoring falla, la transacción completa se revierte y no queda un score desincronizado.
 
-Cada ingesta registra además un lote en `position_ingestion_batches`, incluso cuando ningún trader tiene posiciones. El lote guarda tanto su propio `captured_at` como el `leaderboard_captured_at` exacto usado para elegir wallets. Así un ciclo vacío reemplaza correctamente la cobertura anterior y un refresco concurrente del leaderboard nunca mezcla posiciones de una cohorte con rankings de otra.
+Cada ingesta registra además un lote en `position_ingestion_batches`, incluso cuando ningún trader tiene posiciones. El lote guarda su `captured_at`, el `leaderboard_captured_at` exacto y las dimensiones del cohorte. El scoring bloquea el lote durante la publicación y la base impide duplicar un mercado/lado para el mismo lote.
+
+Al arrancar, el scheduler ejecuta un bootstrap ordenado
+`markets → leaderboard → positions+scores → prices`, con reintentos acotados. Se
+ejecuta como job inmediato dentro del scheduler, de modo que un fallo de red no
+impide que los jobs periódicos sigan vivos.
 
 ## Testing
 
@@ -87,8 +98,23 @@ Cada ingesta registra además un lote en `position_ingestion_batches`, incluso c
 - Test de cobertura cero: mercado activo sin posiciones genera fila con `has_coverage=False`, `score=0`.
 - Test de que un `condition_id` presente en `positions` pero ausente de `markets` se omite.
 - Test de coincidencia exacta de los literales `"Yes"`/`"No"`.
+- Test real de la migración SQL, ejecutada dos veces contra un esquema legado.
+- Tests de paginación completa de posiciones, rechazo de leaderboard parcial,
+  rollback atómico y bootstrap de arranque en frío.
 
 ## Riesgos conocidos
 
 - **Reescalado por ciclo.** El score es relativo al máximo de cada lote, así que un mercado cuyo capital no cambió puede variar de score porque una ballena entró en *otro* mercado. Esto es inherente a cualquier normalización relativa y es aceptable para un score comparativo, pero significa que la serie histórica de `score` no es una serie absoluta. Por eso se persiste también `capital_usd` (bruto, sin normalizar): el backtesting futuro puede recalcular la normalización que prefiera sobre el dato crudo.
 - **Cobertura escasa.** Tras el fix de Fase 1, las posiciones provienen solo del cohorte top-N actual. Es probable que solo unas decenas de mercados tengan cobertura, frente a miles de mercados activos. Esto es correcto por diseño (el pilar de la recomendación es la coincidencia de smart money), pero conviene monitorizar el ratio de cobertura vía el logging del job.
+- **Crecimiento append-only.** Dos filas por mercado activo cada 20 minutos pueden
+  crecer a decenas de millones de filas/año. Antes de una ejecución prolongada en
+  producción se debe convertir `smart_money_scores` en hypertable/partición temporal,
+  habilitar compresión y fijar una política de retención coherente con backtesting.
+- **Estado `active` conservador.** La ingesta no desactiva en masa mercados ausentes
+  de una respuesta Gamma porque una respuesta parcial podría borrar el universo.
+  La reconciliación segura de cierres requiere una señal explícita o varios ciclos
+  confirmados y queda para el siguiente endurecimiento de ingesta.
+- **Paginación sobre datos vivos.** `/positions` no ofrece cursor de snapshot. El
+  cliente ordena, pagina, rechaza duplicados entre páginas y aborta al alcanzar el
+  límite oficial, pero una wallet que opere durante la lectura aún puede requerir
+  reintento para obtener una vista estable.

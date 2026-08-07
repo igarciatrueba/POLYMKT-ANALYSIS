@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -9,8 +8,13 @@ from polymkt.db.models import (
     Position,
     PositionIngestionBatch,
     SmartMoneyScore,
-    TraderRanking,
 )
+from polymkt.db.queries import trader_wallets_at
+from polymkt.domain import BINARY_OUTCOMES
+
+
+class MissingScoringSourceError(RuntimeError):
+    """Raised when a complete source snapshot is unavailable for scoring."""
 
 
 def calculate_smart_money_scores(
@@ -20,34 +24,58 @@ def calculate_smart_money_scores(
     category: str,
     time_period: str,
 ) -> int:
+    if not 1 <= top_n <= 1000:
+        raise ValueError("top_n must be between 1 and 1000")
+
     latest_batch = session.execute(
         select(
+            PositionIngestionBatch.id,
             PositionIngestionBatch.captured_at,
             PositionIngestionBatch.leaderboard_captured_at,
+        )
+        .where(
+            PositionIngestionBatch.category == category,
+            PositionIngestionBatch.time_period == time_period,
+            PositionIngestionBatch.top_n == top_n,
+            PositionIngestionBatch.leaderboard_captured_at.is_not(None),
         )
         .order_by(PositionIngestionBatch.captured_at.desc())
         .limit(1)
     ).first()
     if latest_batch is None:
-        latest_positions_at = session.scalar(select(func.max(Position.captured_at)))
-        latest_ranking_at = session.scalar(
-            select(func.max(TraderRanking.captured_at)).where(
-                TraderRanking.category == category,
-                TraderRanking.time_period == time_period,
-            )
+        raise MissingScoringSourceError(
+            f"No position batch exists for {category}/{time_period}, top_n={top_n}"
         )
-    else:
-        latest_positions_at, latest_ranking_at = latest_batch
+    position_batch_id, latest_positions_at, latest_ranking_at = latest_batch
 
-    wallets = session.scalars(
-        select(TraderRanking.wallet_address)
-        .where(
-            TraderRanking.category == category,
-            TraderRanking.time_period == time_period,
-            TraderRanking.captured_at == latest_ranking_at,
+    wallets = trader_wallets_at(
+        session,
+        captured_at=latest_ranking_at,
+        top_n=top_n,
+        category=category,
+        time_period=time_period,
+    )
+
+    if not wallets:
+        raise MissingScoringSourceError(
+            f"Leaderboard cohort is empty for {category}/{time_period}, top_n={top_n}"
         )
-        .order_by(TraderRanking.rank)
-        .limit(top_n)
+
+    session.execute(
+        select(PositionIngestionBatch.id)
+        .where(PositionIngestionBatch.id == position_batch_id)
+        .with_for_update()
+    )
+    already_scored = session.scalar(
+        select(func.count()).select_from(SmartMoneyScore).where(
+            SmartMoneyScore.position_ingestion_batch_id == position_batch_id
+        )
+    )
+    if already_scored:
+        return 0
+
+    active_condition_ids = session.scalars(
+        select(Market.condition_id).where(Market.active.is_(True))
     ).all()
 
     aggregates: dict[tuple[str, str], tuple[Decimal, int]] = {}
@@ -59,12 +87,12 @@ def calculate_smart_money_scores(
                 func.sum(Position.value_usd),
                 func.count(func.distinct(Position.wallet_address)),
             )
-            .join(Market, Market.condition_id == Position.condition_id)
             .where(
                 Position.wallet_address.in_(wallets),
                 Position.captured_at == latest_positions_at,
-                Position.outcome.in_(("Yes", "No")),
-                Market.active.is_(True),
+                Position.condition_id.in_(active_condition_ids),
+                Position.outcome.in_(BINARY_OUTCOMES),
+                Position.value_usd > 0,
             )
             .group_by(Position.condition_id, Position.outcome)
         ).all()
@@ -73,22 +101,21 @@ def calculate_smart_money_scores(
             for condition_id, outcome, capital, trader_count in rows
         }
 
-    markets = session.scalars(select(Market).where(Market.active.is_(True))).all()
     max_capital = max(
         (capital for capital, _ in aggregates.values()),
         default=Decimal("0.00"),
     )
-    captured_at = datetime.now(timezone.utc)
+    captured_at = latest_positions_at
     scores = []
-    for market in markets:
-        for outcome in ("Yes", "No"):
+    for condition_id in active_condition_ids:
+        for outcome in BINARY_OUTCOMES:
             capital, trader_count = aggregates.get(
-                (market.condition_id, outcome),
+                (condition_id, outcome),
                 (Decimal("0.00"), 0),
             )
             scores.append(
                 SmartMoneyScore(
-                    condition_id=market.condition_id,
+                    condition_id=condition_id,
                     outcome=outcome,
                     capital_usd=capital,
                     score=(
@@ -101,6 +128,7 @@ def calculate_smart_money_scores(
                     has_coverage=capital > 0,
                     trader_count=trader_count,
                     captured_at=captured_at,
+                    position_ingestion_batch_id=position_batch_id,
                 )
             )
 

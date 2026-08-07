@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 
 from polymkt.db.models import Position, PositionIngestionBatch, TraderRanking
-from polymkt.ingestion.positions import ingest_positions_for_top_traders
+import pytest
+
+from polymkt.ingestion.positions import (
+    MissingLeaderboardCohortError,
+    ingest_positions_for_top_traders,
+)
 
 
 class FakeDataApiClient:
@@ -64,6 +69,17 @@ def test_ingest_positions_skips_wallets_with_no_positions(db_session):
     assert db_session.query(PositionIngestionBatch).count() == 1
 
 
+def test_ingest_positions_rejects_a_missing_leaderboard_cohort(db_session):
+    client = FakeDataApiClient(positions_by_wallet={})
+
+    with pytest.raises(MissingLeaderboardCohortError, match="OVERALL/ALL"):
+        ingest_positions_for_top_traders(
+            db_session, client, top_n=300, category="OVERALL", time_period="ALL"
+        )
+
+    assert db_session.query(PositionIngestionBatch).count() == 0
+
+
 def test_ingest_positions_excludes_wallets_from_older_snapshot(db_session):
     older_captured_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     newer_captured_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
@@ -109,3 +125,6 @@ def test_ingest_positions_excludes_wallets_from_older_snapshot(db_session):
     assert position.wallet_address == "0xnew"
     batch = db_session.query(PositionIngestionBatch).one()
     assert batch.leaderboard_captured_at == newer_captured_at
+    assert batch.category == "OVERALL"
+    assert batch.time_period == "ALL"
+    assert batch.top_n == 300

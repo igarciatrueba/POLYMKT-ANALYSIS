@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Index, Numeric, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -80,6 +89,19 @@ class PositionIngestionBatch(Base):
     leaderboard_captured_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    time_period: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    top_n: Mapped[int | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_position_batches_cohort_snapshot",
+            "category",
+            "time_period",
+            "top_n",
+            "captured_at",
+        ),
+    )
 
 
 class MarketPriceSnapshot(Base):
@@ -105,6 +127,9 @@ class SmartMoneyScore(Base):
     has_coverage: Mapped[bool] = mapped_column(Boolean, nullable=False)
     trader_count: Mapped[int] = mapped_column(nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    position_ingestion_batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("position_ingestion_batches.id"), nullable=True
+    )
 
     __table_args__ = (
         Index(
@@ -112,5 +137,15 @@ class SmartMoneyScore(Base):
             "captured_at",
             "condition_id",
             "outcome",
+        ),
+        Index(
+            "ix_smart_money_scores_position_batch",
+            "position_ingestion_batch_id",
+        ),
+        UniqueConstraint(
+            "position_ingestion_batch_id",
+            "condition_id",
+            "outcome",
+            name="uq_smart_money_score_position_batch_market",
         ),
     )

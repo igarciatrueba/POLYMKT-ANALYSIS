@@ -53,5 +53,22 @@ For an existing development database created before Smart Money scoring, apply
 the versioned schema migration once:
 
 ```bash
-docker compose exec -T db psql -U postgres -d polymkt < db/migrations/002_add_smart_money_scoring.sql
+docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d polymkt < db/migrations/002_add_smart_money_scoring.sql
 ```
+
+Use fail-fast mode when applying it outside Docker as well:
+
+```bash
+psql -v ON_ERROR_STOP=1 "postgresql://postgres:postgres@localhost:5432/polymkt" \
+  -f db/migrations/002_add_smart_money_scoring.sql
+```
+
+The migration is additive and forward-only: rolling the application back leaves
+the new tables, columns and indexes in place without deleting historical data.
+Concurrent index creation avoids blocking the ingestion tables. If PostgreSQL is
+interrupted while building an index, inspect `pg_index.indisvalid`, drop only the
+reported invalid index with `DROP INDEX CONCURRENTLY`, and rerun the migration.
+
+At process startup the scheduler immediately bootstraps markets, leaderboard,
+positions/scores and prices in dependency order. Missing or partial source data
+aborts that score cycle; it is never persisted as a healthy-looking zero signal.

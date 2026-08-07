@@ -4,7 +4,7 @@
 
 **Goal:** Calculate and persist a normalized Smart Money score for both sides of every known active binary market using only the latest top-trader and position snapshots.
 
-**Architecture:** Add an append-only `SmartMoneyScore` SQLAlchemy model and a focused `calculate_smart_money_scores` service. SQLAlchemy queries select the configured latest leaderboard cohort and aggregate the latest position snapshot; Python completes the zero-anchored normalization and persists one shared-timestamp batch. The existing scheduler invokes the service every 20 minutes after position ingestion.
+**Architecture:** Add an append-only `SmartMoneyScore` SQLAlchemy model and a focused `calculate_smart_money_scores` service. Each position batch pins its exact leaderboard cohort and configuration; scoring locks and links to that batch, normalizes capital against zero, and persists source-timestamped rows. The scheduler invokes it atomically after position ingestion and bootstraps dependencies in order on startup.
 
 **Tech Stack:** Python 3.11+, SQLAlchemy 2.0, PostgreSQL/TimescaleDB, APScheduler, pytest.
 
@@ -15,7 +15,7 @@
 - Use only the latest `TraderRanking` snapshot for the configured `category` and `time_period`, ordered by rank and limited to `top_n`.
 - Use only the latest completed `PositionIngestionBatch`, including an explicitly recorded empty batch, and the exact leaderboard timestamp linked from that batch. Historical rows or concurrently refreshed cohorts must never inflate, erase, or leak into current capital.
 - Score only active known binary markets and the exact outcomes `"Yes"` and `"No"`.
-- Persist coverage-zero rows, use one `captured_at` value per execution, and never upsert historical scores.
+- Persist coverage-zero rows for valid completed batches, use the source batch's `captured_at`, reject missing/partial sources, and never upsert historical scores.
 - Normalize with `capital_usd / max_capital_in_batch * 100`; if the maximum is zero, every score is zero.
 - No HTTP client is involved in scoring.
 
@@ -30,27 +30,27 @@
 **Interfaces:**
 - Produces: `polymkt.db.models.SmartMoneyScore`, mapped to `smart_money_scores` with `condition_id`, `outcome`, `capital_usd`, `score`, `has_coverage`, `trader_count`, and `captured_at`.
 
-- [ ] **Step 1: Write a failing round-trip test**
+- [x] **Step 1: Write a failing round-trip test**
 
 Add a test that inserts a `SmartMoneyScore`, flushes it, reloads it, and asserts all fields including `Decimal("1250.50")`, `Decimal("82.75")`, `True`, trader count `3`, and the supplied timestamp.
 
-- [ ] **Step 2: Verify the test fails for the missing model**
+- [x] **Step 2: Verify the test fails for the missing model**
 
 Run: `.venv/bin/pytest tests/test_models.py::test_smart_money_score_round_trip -v`
 
 Expected: collection fails because `SmartMoneyScore` cannot be imported.
 
-- [ ] **Step 3: Implement the mapped model**
+- [x] **Step 3: Implement the mapped model**
 
 Add the model using `BigInteger`, `String(80/16)`, `Numeric(18,2)`, `Numeric(6,2)`, `Boolean`, integer `trader_count`, and timezone-aware `DateTime`, all non-nullable.
 
-- [ ] **Step 4: Verify the model test passes**
+- [x] **Step 4: Verify the model test passes**
 
 Run: `.venv/bin/pytest tests/test_models.py::test_smart_money_score_round_trip -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the model**
+- [x] **Step 5: Commit the model**
 
 ```bash
 git add src/polymkt/db/models.py tests/test_models.py
@@ -70,41 +70,41 @@ git commit -m "feat: add smart money score model"
 - Consumes: `Session`, `Market`, `TraderRanking`, `Position`, `SmartMoneyScore`.
 - Produces: `calculate_smart_money_scores(session: Session, *, top_n: int, category: str, time_period: str) -> int`.
 
-- [ ] **Step 1: Test capital aggregation and both market sides**
+- [x] **Step 1: Test capital aggregation and both market sides**
 
 Create synthetic active markets, one latest leaderboard cohort, and positions where two current top traders hold `Yes` capital. Assert the function returns two rows per market, sums `value_usd`, counts distinct wallets, and persists an uncovered `No` side.
 
-- [ ] **Step 2: Verify the aggregation test fails**
+- [x] **Step 2: Verify the aggregation test fails**
 
 Run: `.venv/bin/pytest tests/test_smart_money_scoring.py::test_aggregates_current_top_trader_capital_for_both_sides -v`
 
 Expected: collection fails because `polymkt.scoring.smart_money` does not exist.
 
-- [ ] **Step 3: Implement the minimum scoring service**
+- [x] **Step 3: Implement the minimum scoring service**
 
 Create the scoring package. Resolve the latest matching leaderboard timestamp, select its first `top_n` wallet addresses by rank, resolve the maximum position timestamp, query active markets, aggregate matching positions by `(condition_id, outcome)`, and append `SmartMoneyScore` rows for exact `Yes` and `No` outcomes using one UTC timestamp. Return the number of rows added.
 
-- [ ] **Step 4: Verify the aggregation test passes**
+- [x] **Step 4: Verify the aggregation test passes**
 
 Run the test from Step 2 and expect PASS.
 
-- [ ] **Step 5: Test historical snapshot exclusion**
+- [x] **Step 5: Test historical snapshot exclusion**
 
 Add old and new leaderboard and position snapshots with deliberately larger old capital. Assert only wallets from the latest matching cohort and positions from the latest position timestamp affect the result.
 
-- [ ] **Step 6: Verify RED, then implement the snapshot filters and verify GREEN**
+- [x] **Step 6: Verify RED, then implement the snapshot filters and verify GREEN**
 
 Run the new test before and after the query change. The first run must fail by reporting old capital or traders; the second must pass.
 
-- [ ] **Step 7: Test scope rules**
+- [x] **Step 7: Test scope rules**
 
 Add tests proving inactive markets and unknown `condition_id` values produce no rows, and lowercase/unknown outcomes do not create coverage for exact `Yes`/`No` sides.
 
-- [ ] **Step 8: Verify RED, implement the filters, and verify GREEN**
+- [x] **Step 8: Verify RED, implement the filters, and verify GREEN**
 
 Run only the new scope tests before and after the minimum filter changes.
 
-- [ ] **Step 9: Commit aggregation behavior**
+- [x] **Step 9: Commit aggregation behavior**
 
 ```bash
 git add src/polymkt/scoring tests/test_smart_money_scoring.py
@@ -123,37 +123,37 @@ git commit -m "feat: aggregate current smart money capital"
 - Preserves: `calculate_smart_money_scores(...) -> int`.
 - Produces: two-decimal `score` values and exact two-decimal `capital_usd` values compatible with the database schema.
 
-- [ ] **Step 1: Test zero-anchored normalization**
+- [x] **Step 1: Test zero-anchored normalization**
 
 Create two covered sides with capital `$500000` and `$50`. Assert scores are `Decimal("100.00")` and `Decimal("0.01")`, demonstrating this is not min-max normalization.
 
-- [ ] **Step 2: Verify the normalization test fails**
+- [x] **Step 2: Verify the normalization test fails**
 
 Run the single test and confirm the lower-capital side does not yet produce `0.01`.
 
-- [ ] **Step 3: Implement Decimal-based normalization**
+- [x] **Step 3: Implement Decimal-based normalization**
 
 Find the largest capital across the batch and calculate `(capital / maximum) * Decimal("100")`, quantized to `Decimal("0.01")`. Set `has_coverage` from positive capital.
 
-- [ ] **Step 4: Verify normalization passes**
+- [x] **Step 4: Verify normalization passes**
 
 Run the single test and expect PASS.
 
-- [ ] **Step 5: Test the all-zero batch and missing source snapshots**
+- [x] **Step 5: Test the all-zero batch and missing source snapshots**
 
-Assert active markets without positions create zero-score, zero-capital, zero-trader rows without division errors. Assert an empty leaderboard or empty positions table also produces the same complete zero-coverage batch for active markets.
+Assert a valid completed empty position batch creates zero-score, zero-capital, zero-trader rows without division errors. Assert missing leaderboard or position sources reject publication instead of masquerading as a healthy zero batch.
 
-- [ ] **Step 6: Verify RED, implement zero handling, and verify GREEN**
+- [x] **Step 6: Verify RED, implement zero handling, and verify GREEN**
 
 Run the new tests before and after the smallest necessary changes.
 
-- [ ] **Step 7: Run the focused scoring suite**
+- [x] **Step 7: Run the focused scoring suite**
 
 Run: `.venv/bin/pytest tests/test_smart_money_scoring.py -v`
 
 Expected: all scoring tests PASS.
 
-- [ ] **Step 8: Commit normalization**
+- [x] **Step 8: Commit normalization**
 
 ```bash
 git add src/polymkt/scoring/smart_money.py tests/test_smart_money_scoring.py
@@ -171,31 +171,31 @@ git commit -m "feat: normalize smart money scores"
 **Interfaces:**
 - Produces: `run_smart_money_scoring() -> None` for manual execution and atomic scoring from the scheduled `position_ingestion` job every 20 minutes.
 
-- [ ] **Step 1: Extend the scheduler and sequencing tests first**
+- [x] **Step 1: Extend the scheduler and sequencing tests first**
 
 Require `position_ingestion` to remain at `20 * 60` seconds and assert that it calls scoring only after position ingestion completes.
 
-- [ ] **Step 2: Verify the scheduler test fails**
+- [x] **Step 2: Verify the scheduler test fails**
 
 Run: `.venv/bin/pytest tests/test_run.py -v`
 
 Expected: FAIL because position ingestion does not yet call scoring.
 
-- [ ] **Step 3: Add the runner and scheduler job**
+- [x] **Step 3: Add the runner and scheduler job**
 
 Import `calculate_smart_money_scores`. Add `run_smart_money_scoring()` for manual execution, and call the service from `run_position_ingestion()` after its position flush using the same session and configured cohort. Do not register an independent concurrent job or create another HTTP client.
 
-- [ ] **Step 4: Add and verify a runner interaction test**
+- [x] **Step 4: Add and verify a runner interaction test**
 
 Patch `get_session` and `calculate_smart_money_scores`, call the runner, and assert the service receives the yielded session and configured values. Observe RED before adding missing wiring, then GREEN.
 
-- [ ] **Step 5: Run scheduler tests**
+- [x] **Step 5: Run scheduler tests**
 
 Run: `.venv/bin/pytest tests/test_run.py -v`
 
 Expected: all tests PASS.
 
-- [ ] **Step 6: Commit scheduler integration**
+- [x] **Step 6: Commit scheduler integration**
 
 ```bash
 git add src/polymkt/run.py tests/test_run.py
@@ -212,36 +212,36 @@ git commit -m "feat: schedule smart money scoring"
 **Interfaces:**
 - Documents the completed Phase 1 ingestion foundation and the newly implemented Smart Money scoring phase.
 
-- [ ] **Step 1: Update project status and roadmap**
+- [x] **Step 1: Update project status and roadmap**
 
 Mark Smart Money scoring complete, describe the append-only score snapshots briefly, and remove the stale claim that Phase 1 ingestion is still under development.
 
-- [ ] **Step 2: Start the test database**
+- [x] **Step 2: Start the test database**
 
 Run: `docker compose up -d db`
 
 Wait for PostgreSQL to accept connections. If the persisted volume predates `polymkt_test`, create that database explicitly before testing.
 
-- [ ] **Step 3: Run the complete test suite**
+- [x] **Step 3: Run the complete test suite**
 
 Run: `.venv/bin/pytest -v`
 
 Expected: all tests PASS with zero failures.
 
-- [ ] **Step 4: Inspect repository state and diff**
+- [x] **Step 4: Inspect repository state and diff**
 
 Run: `git status --short && git diff --check && git diff main...HEAD --stat`
 
 Expected: no whitespace errors; only Phase 2 design, plan, model, scoring, tests, scheduler, `.gitignore`, and README changes.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add README.md
 git commit -m "docs: mark smart money scoring complete"
 ```
 
-- [ ] **Step 6: Re-run full verification after the final commit**
+- [x] **Step 6: Re-run full verification after the final commit**
 
 Run: `.venv/bin/pytest -v && git diff --check main...HEAD`
 
