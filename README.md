@@ -7,7 +7,11 @@ A recommendation engine for Polymarket that ranks betting opportunities by combi
 
 ## Project Status
 
-🚧 Phase 1 (MVP) — Architecture and data pipeline under development.
+🚧 Phase 2 (MVP) — Ingestion is complete and Smart Money scoring is implemented.
+
+Each scoring cycle aggregates the latest positions held by the current top-N
+trader cohort, normalizes capital to a zero-anchored 0-100 score, and stores an
+append-only snapshot for both sides of every active binary market.
 
 ## Planned Stack
 
@@ -24,7 +28,7 @@ A recommendation engine for Polymarket that ranks betting opportunities by combi
 - [x] Leaderboard ingestion
 - [x] Position ingestion
 - [x] Price ingestion
-- [ ] Smart Money scoring
+- [x] Smart Money scoring
 - [ ] Edge scoring
 - [ ] Recommendation engine
 - [ ] REST API
