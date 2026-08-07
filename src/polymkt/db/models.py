@@ -53,6 +53,15 @@ class Position(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PositionIngestionBatch(Base):
+    __tablename__ = "position_ingestion_batches"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), unique=True, nullable=False
+    )
+
+
 class MarketPriceSnapshot(Base):
     __tablename__ = "market_price_snapshots"
 

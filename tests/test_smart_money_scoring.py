@@ -3,7 +3,13 @@ from decimal import Decimal
 
 import pytest
 
-from polymkt.db.models import Market, Position, SmartMoneyScore, TraderRanking
+from polymkt.db.models import (
+    Market,
+    Position,
+    PositionIngestionBatch,
+    SmartMoneyScore,
+    TraderRanking,
+)
 from polymkt.scoring.smart_money import calculate_smart_money_scores
 
 
@@ -432,3 +438,47 @@ def test_persists_zero_coverage_when_a_source_snapshot_is_missing(
     assert all(row.score == Decimal("0.00") for row in scores)
     assert all(row.has_coverage is False for row in scores)
     assert all(row.trader_count == 0 for row in scores)
+
+
+def test_latest_empty_position_batch_clears_stale_coverage(db_session):
+    old = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
+    current = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            Market(
+                condition_id="0xmarket",
+                slug="market",
+                question="Will it happen?",
+                active=True,
+            ),
+            TraderRanking(
+                wallet_address="0xaaa",
+                rank=1,
+                pnl=100,
+                volume=100,
+                time_period="ALL",
+                category="OVERALL",
+                captured_at=current,
+            ),
+            PositionIngestionBatch(captured_at=old),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xmarket",
+                outcome="Yes",
+                size=10,
+                value_usd=Decimal("500.00"),
+                captured_at=old,
+            ),
+            PositionIngestionBatch(captured_at=current),
+        ]
+    )
+    db_session.flush()
+
+    calculate_smart_money_scores(
+        db_session, top_n=300, category="OVERALL", time_period="ALL"
+    )
+
+    scores = db_session.query(SmartMoneyScore).all()
+    assert all(row.capital_usd == Decimal("0.00") for row in scores)
+    assert all(row.score == Decimal("0.00") for row in scores)
+    assert all(row.has_coverage is False for row in scores)

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from polymkt.db.models import Position, TraderRanking
+from polymkt.db.models import Position, PositionIngestionBatch, TraderRanking
 from polymkt.ingestion.positions import ingest_positions_for_top_traders
 
 
@@ -61,6 +61,7 @@ def test_ingest_positions_skips_wallets_with_no_positions(db_session):
 
     assert count == 0
     assert db_session.query(Position).count() == 0
+    assert db_session.query(PositionIngestionBatch).count() == 1
 
 
 def test_ingest_positions_excludes_wallets_from_older_snapshot(db_session):

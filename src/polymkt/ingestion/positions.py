@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from polymkt.db.models import Position, TraderRanking
+from polymkt.db.models import Position, PositionIngestionBatch, TraderRanking
 
 
 def _latest_top_trader_wallets(
@@ -41,6 +41,7 @@ def ingest_positions_for_top_traders(
         session, top_n=top_n, category=category, time_period=time_period
     )
     captured_at = datetime.now(timezone.utc)
+    session.add(PositionIngestionBatch(captured_at=captured_at))
     total = 0
 
     for wallet_address in wallet_addresses:

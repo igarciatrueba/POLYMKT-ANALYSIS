@@ -4,7 +4,13 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from polymkt.db.models import Market, Position, SmartMoneyScore, TraderRanking
+from polymkt.db.models import (
+    Market,
+    Position,
+    PositionIngestionBatch,
+    SmartMoneyScore,
+    TraderRanking,
+)
 
 
 def calculate_smart_money_scores(
@@ -32,7 +38,11 @@ def calculate_smart_money_scores(
     ).all()
 
     aggregates: dict[tuple[str, str], tuple[Decimal, int]] = {}
-    latest_positions_at = session.scalar(select(func.max(Position.captured_at)))
+    latest_positions_at = session.scalar(
+        select(func.max(PositionIngestionBatch.captured_at))
+    )
+    if latest_positions_at is None:
+        latest_positions_at = session.scalar(select(func.max(Position.captured_at)))
     if wallets and latest_positions_at is not None:
         rows = session.execute(
             select(
