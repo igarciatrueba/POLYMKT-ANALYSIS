@@ -20,12 +20,25 @@ def calculate_smart_money_scores(
     category: str,
     time_period: str,
 ) -> int:
-    latest_ranking_at = session.scalar(
-        select(func.max(TraderRanking.captured_at)).where(
-            TraderRanking.category == category,
-            TraderRanking.time_period == time_period,
+    latest_batch = session.execute(
+        select(
+            PositionIngestionBatch.captured_at,
+            PositionIngestionBatch.leaderboard_captured_at,
         )
-    )
+        .order_by(PositionIngestionBatch.captured_at.desc())
+        .limit(1)
+    ).first()
+    if latest_batch is None:
+        latest_positions_at = session.scalar(select(func.max(Position.captured_at)))
+        latest_ranking_at = session.scalar(
+            select(func.max(TraderRanking.captured_at)).where(
+                TraderRanking.category == category,
+                TraderRanking.time_period == time_period,
+            )
+        )
+    else:
+        latest_positions_at, latest_ranking_at = latest_batch
+
     wallets = session.scalars(
         select(TraderRanking.wallet_address)
         .where(
@@ -38,11 +51,6 @@ def calculate_smart_money_scores(
     ).all()
 
     aggregates: dict[tuple[str, str], tuple[Decimal, int]] = {}
-    latest_positions_at = session.scalar(
-        select(func.max(PositionIngestionBatch.captured_at))
-    )
-    if latest_positions_at is None:
-        latest_positions_at = session.scalar(select(func.max(Position.captured_at)))
     if wallets and latest_positions_at is not None:
         rows = session.execute(
             select(

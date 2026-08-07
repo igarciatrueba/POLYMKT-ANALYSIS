@@ -77,6 +77,9 @@ class PositionIngestionBatch(Base):
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), unique=True, nullable=False
     )
+    leaderboard_captured_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class MarketPriceSnapshot(Base):

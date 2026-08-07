@@ -13,7 +13,7 @@
 - Work only on `worktree-smart-money-scoring`; never commit or push directly to `main`.
 - Follow strict TDD: add one failing behavior test, run it and observe the expected failure, then add the minimum production code.
 - Use only the latest `TraderRanking` snapshot for the configured `category` and `time_period`, ordered by rank and limited to `top_n`.
-- Use only the latest completed `PositionIngestionBatch`, including an explicitly recorded empty batch. Historical rows must never inflate or leak into current capital.
+- Use only the latest completed `PositionIngestionBatch`, including an explicitly recorded empty batch, and the exact leaderboard timestamp linked from that batch. Historical rows or concurrently refreshed cohorts must never inflate, erase, or leak into current capital.
 - Score only active known binary markets and the exact outcomes `"Yes"` and `"No"`.
 - Persist coverage-zero rows, use one `captured_at` value per execution, and never upsert historical scores.
 - Normalize with `capital_usd / max_capital_in_batch * 100`; if the maximum is zero, every score is zero.

@@ -75,7 +75,7 @@ El scoring se encadena al job existente de `position_ingestion` (20 minutos), in
 
 `run_smart_money_scoring()` queda disponible para ejecución manual, pero el scheduler llama al cálculo desde `run_position_ingestion()` tras el `flush` de posiciones. Si la ingesta o el scoring falla, la transacción completa se revierte y no queda un score desincronizado.
 
-Cada ingesta registra además un lote en `position_ingestion_batches`, incluso cuando ningún trader tiene posiciones. Así un ciclo vacío reemplaza correctamente la cobertura anterior en vez de reutilizar para siempre el último lote no vacío.
+Cada ingesta registra además un lote en `position_ingestion_batches`, incluso cuando ningún trader tiene posiciones. El lote guarda tanto su propio `captured_at` como el `leaderboard_captured_at` exacto usado para elegir wallets. Así un ciclo vacío reemplaza correctamente la cobertura anterior y un refresco concurrente del leaderboard nunca mezcla posiciones de una cohorte con rankings de otra.
 
 ## Testing
 

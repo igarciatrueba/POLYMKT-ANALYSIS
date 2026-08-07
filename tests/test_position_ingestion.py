@@ -107,3 +107,5 @@ def test_ingest_positions_excludes_wallets_from_older_snapshot(db_session):
     assert count == 1
     position = db_session.query(Position).one()
     assert position.wallet_address == "0xnew"
+    batch = db_session.query(PositionIngestionBatch).one()
+    assert batch.leaderboard_captured_at == newer_captured_at

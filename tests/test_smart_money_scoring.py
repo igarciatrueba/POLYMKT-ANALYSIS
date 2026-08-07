@@ -482,3 +482,58 @@ def test_latest_empty_position_batch_clears_stale_coverage(db_session):
     assert all(row.capital_usd == Decimal("0.00") for row in scores)
     assert all(row.score == Decimal("0.00") for row in scores)
     assert all(row.has_coverage is False for row in scores)
+
+
+def test_position_batch_keeps_the_leaderboard_cohort_used_for_ingestion(db_session):
+    old_ranking_at = datetime(2026, 8, 6, 8, 0, tzinfo=timezone.utc)
+    position_batch_at = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    new_ranking_at = datetime(2026, 8, 7, 12, 1, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            Market(
+                condition_id="0xmarket",
+                slug="market",
+                question="Will it happen?",
+                active=True,
+            ),
+            TraderRanking(
+                wallet_address="0xold-cohort",
+                rank=1,
+                pnl=100,
+                volume=100,
+                time_period="ALL",
+                category="OVERALL",
+                captured_at=old_ranking_at,
+            ),
+            PositionIngestionBatch(
+                captured_at=position_batch_at,
+                leaderboard_captured_at=old_ranking_at,
+            ),
+            Position(
+                wallet_address="0xold-cohort",
+                condition_id="0xmarket",
+                outcome="Yes",
+                size=10,
+                value_usd=Decimal("500.00"),
+                captured_at=position_batch_at,
+            ),
+            TraderRanking(
+                wallet_address="0xnew-cohort",
+                rank=1,
+                pnl=200,
+                volume=200,
+                time_period="ALL",
+                category="OVERALL",
+                captured_at=new_ranking_at,
+            ),
+        ]
+    )
+    db_session.flush()
+
+    calculate_smart_money_scores(
+        db_session, top_n=300, category="OVERALL", time_period="ALL"
+    )
+
+    yes_score = db_session.query(SmartMoneyScore).filter_by(outcome="Yes").one()
+    assert yes_score.capital_usd == Decimal("500.00")
+    assert yes_score.score == Decimal("100.00")
