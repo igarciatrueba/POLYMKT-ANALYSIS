@@ -63,3 +63,16 @@ class MarketPriceSnapshot(Base):
     best_bid: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
     best_ask: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SmartMoneyScore(Base):
+    __tablename__ = "smart_money_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    condition_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    capital_usd: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    score: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    has_coverage: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    trader_count: Mapped[int] = mapped_column(nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
