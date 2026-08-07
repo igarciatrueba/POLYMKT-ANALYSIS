@@ -41,5 +41,6 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
 pytest -v
+python -m polymkt.init_db  # creates the schema on the dev database
 python -m polymkt.run
 ```
