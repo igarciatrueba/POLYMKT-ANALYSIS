@@ -54,6 +54,13 @@ def run_position_ingestion() -> None:
                 time_period=settings.leaderboard_time_period,
             )
             logger.info("ingest_positions_for_top_traders: wrote %d positions", count)
+            score_count = calculate_smart_money_scores(
+                session,
+                top_n=settings.top_n_traders,
+                category=settings.leaderboard_category,
+                time_period=settings.leaderboard_time_period,
+            )
+            logger.info("calculate_smart_money_scores: wrote %d scores", score_count)
     finally:
         client.close()
 
@@ -85,12 +92,6 @@ def build_scheduler() -> BlockingScheduler:
     scheduler.add_job(run_leaderboard_ingestion, "interval", hours=24, id="leaderboard_ingestion")
     scheduler.add_job(run_position_ingestion, "interval", minutes=20, id="position_ingestion")
     scheduler.add_job(run_price_ingestion, "interval", minutes=3, id="price_ingestion")
-    scheduler.add_job(
-        run_smart_money_scoring,
-        "interval",
-        minutes=20,
-        id="smart_money_scoring",
-    )
     return scheduler
 
 
