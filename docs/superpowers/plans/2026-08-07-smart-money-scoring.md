@@ -247,6 +247,6 @@ Run: `.venv/bin/pytest -v && git diff --check main...HEAD`
 
 Expected: all tests PASS and the diff check exits 0.
 
-- [ ] **Step 7: Publish for review**
+- [x] **Step 7: Publish for review**
 
 Push the feature branch and open a pull request against `main` following `WORKFLOW.md`. Do not merge it.
