@@ -41,9 +41,12 @@ def calculate_smart_money_scores(
                 func.sum(Position.value_usd),
                 func.count(func.distinct(Position.wallet_address)),
             )
+            .join(Market, Market.condition_id == Position.condition_id)
             .where(
                 Position.wallet_address.in_(wallets),
                 Position.captured_at == latest_positions_at,
+                Position.outcome.in_(("Yes", "No")),
+                Market.active.is_(True),
             )
             .group_by(Position.condition_id, Position.outcome)
         ).all()

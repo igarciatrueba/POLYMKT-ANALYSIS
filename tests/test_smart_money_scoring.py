@@ -312,6 +312,78 @@ def test_normalizes_capital_against_zero_and_batch_maximum(db_session):
     }
 
 
+def test_invalid_positions_do_not_contaminate_normalization_maximum(db_session):
+    captured_at = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            Market(
+                condition_id="0xvalid",
+                slug="valid",
+                question="Valid?",
+                active=True,
+            ),
+            Market(
+                condition_id="0xinactive",
+                slug="inactive",
+                question="Inactive?",
+                active=False,
+            ),
+            TraderRanking(
+                wallet_address="0xaaa",
+                rank=1,
+                pnl=100,
+                volume=100,
+                time_period="ALL",
+                category="OVERALL",
+                captured_at=captured_at,
+            ),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xvalid",
+                outcome="Yes",
+                size=10,
+                value_usd=Decimal("100.00"),
+                captured_at=captured_at,
+            ),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xinactive",
+                outcome="Yes",
+                size=10,
+                value_usd=Decimal("1000.00"),
+                captured_at=captured_at,
+            ),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xunknown",
+                outcome="Yes",
+                size=10,
+                value_usd=Decimal("2000.00"),
+                captured_at=captured_at,
+            ),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xvalid",
+                outcome="yes",
+                size=10,
+                value_usd=Decimal("3000.00"),
+                captured_at=captured_at,
+            ),
+        ]
+    )
+    db_session.flush()
+
+    calculate_smart_money_scores(
+        db_session, top_n=300, category="OVERALL", time_period="ALL"
+    )
+
+    valid_yes = db_session.query(SmartMoneyScore).filter_by(
+        condition_id="0xvalid", outcome="Yes"
+    ).one()
+    assert valid_yes.capital_usd == Decimal("100.00")
+    assert valid_yes.score == Decimal("100.00")
+
+
 @pytest.mark.parametrize("missing_source", ["rankings", "positions"])
 def test_persists_zero_coverage_when_a_source_snapshot_is_missing(
     db_session, missing_source
