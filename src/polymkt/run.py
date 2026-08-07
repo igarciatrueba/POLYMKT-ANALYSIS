@@ -11,6 +11,7 @@ from polymkt.ingestion.leaderboard import ingest_leaderboard
 from polymkt.ingestion.markets import ingest_markets
 from polymkt.ingestion.positions import ingest_positions_for_top_traders
 from polymkt.ingestion.prices import ingest_prices
+from polymkt.scoring.smart_money import calculate_smart_money_scores
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,29 @@ def run_price_ingestion() -> None:
         client.close()
 
 
+def run_smart_money_scoring() -> None:
+    with get_session() as session:
+        count = calculate_smart_money_scores(
+            session,
+            top_n=settings.top_n_traders,
+            category=settings.leaderboard_category,
+            time_period=settings.leaderboard_time_period,
+        )
+        logger.info("calculate_smart_money_scores: wrote %d scores", count)
+
+
 def build_scheduler() -> BlockingScheduler:
     scheduler = BlockingScheduler(timezone="UTC")
     scheduler.add_job(run_market_ingestion, "interval", minutes=20, id="market_ingestion")
     scheduler.add_job(run_leaderboard_ingestion, "interval", hours=24, id="leaderboard_ingestion")
     scheduler.add_job(run_position_ingestion, "interval", minutes=20, id="position_ingestion")
     scheduler.add_job(run_price_ingestion, "interval", minutes=3, id="price_ingestion")
+    scheduler.add_job(
+        run_smart_money_scoring,
+        "interval",
+        minutes=20,
+        id="smart_money_scoring",
+    )
     return scheduler
 
 
