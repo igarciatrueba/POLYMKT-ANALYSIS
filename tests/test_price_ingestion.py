@@ -50,3 +50,20 @@ def test_ingest_prices_skips_outcome_with_no_order_book(db_session):
 
     assert count == 0
     assert db_session.query(MarketPriceSnapshot).count() == 0
+
+
+def test_ingest_prices_skips_outcome_with_one_sided_order_book(db_session):
+    _add_test_market(db_session)
+    books = [
+        {"asset_id": "111", "bids": [{"price": "0.40", "size": "10"}], "asks": []},
+        {"asset_id": "222", "bids": [{"price": "0.55", "size": "10"}], "asks": [{"price": "0.59", "size": "10"}]},
+    ]
+    client = FakeClobClient(books)
+
+    count = ingest_prices(db_session, client)
+
+    assert count == 1
+    assert db_session.query(MarketPriceSnapshot).filter_by(condition_id="0xabc", outcome="Yes").count() == 0
+    no_snapshot = db_session.query(MarketPriceSnapshot).filter_by(condition_id="0xabc", outcome="No").one()
+    assert float(no_snapshot.best_bid) == 0.55
+    assert float(no_snapshot.best_ask) == 0.59
