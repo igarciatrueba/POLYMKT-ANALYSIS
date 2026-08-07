@@ -1,3 +1,5 @@
+import logging
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from polymkt.clients.clob_client import ClobClient
@@ -10,12 +12,15 @@ from polymkt.ingestion.markets import ingest_markets
 from polymkt.ingestion.positions import ingest_positions_for_top_traders
 from polymkt.ingestion.prices import ingest_prices
 
+logger = logging.getLogger(__name__)
+
 
 def run_market_ingestion() -> None:
     client = GammaClient(base_url=settings.gamma_base_url)
     try:
         with get_session() as session:
-            ingest_markets(session, client)
+            count = ingest_markets(session, client)
+            logger.info("ingest_markets: wrote %d markets", count)
     finally:
         client.close()
 
@@ -24,13 +29,14 @@ def run_leaderboard_ingestion() -> None:
     client = DataApiClient(base_url=settings.data_api_base_url)
     try:
         with get_session() as session:
-            ingest_leaderboard(
+            count = ingest_leaderboard(
                 session,
                 client,
                 top_n=settings.top_n_traders,
                 category=settings.leaderboard_category,
                 time_period=settings.leaderboard_time_period,
             )
+            logger.info("ingest_leaderboard: wrote %d trader rankings", count)
     finally:
         client.close()
 
@@ -39,13 +45,14 @@ def run_position_ingestion() -> None:
     client = DataApiClient(base_url=settings.data_api_base_url)
     try:
         with get_session() as session:
-            ingest_positions_for_top_traders(
+            count = ingest_positions_for_top_traders(
                 session,
                 client,
                 top_n=settings.top_n_traders,
                 category=settings.leaderboard_category,
                 time_period=settings.leaderboard_time_period,
             )
+            logger.info("ingest_positions_for_top_traders: wrote %d positions", count)
     finally:
         client.close()
 
@@ -54,7 +61,8 @@ def run_price_ingestion() -> None:
     client = ClobClient(base_url=settings.clob_base_url)
     try:
         with get_session() as session:
-            ingest_prices(session, client)
+            count = ingest_prices(session, client)
+            logger.info("ingest_prices: wrote %d snapshots", count)
     finally:
         client.close()
 
@@ -69,6 +77,7 @@ def build_scheduler() -> BlockingScheduler:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     scheduler = build_scheduler()
     scheduler.start()
 
