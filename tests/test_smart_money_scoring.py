@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from polymkt.db.models import Market, Position, SmartMoneyScore, TraderRanking
 from polymkt.scoring.smart_money import calculate_smart_money_scores
 
@@ -249,3 +251,112 @@ def test_requires_exact_yes_and_no_outcome_literals(db_session):
     assert {row.outcome for row in scores} == {"Yes", "No"}
     assert all(row.has_coverage is False for row in scores)
     assert all(row.capital_usd == Decimal("0.00") for row in scores)
+
+
+def test_normalizes_capital_against_zero_and_batch_maximum(db_session):
+    captured_at = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            Market(
+                condition_id="0xlarge",
+                slug="large",
+                question="Large?",
+                active=True,
+            ),
+            Market(
+                condition_id="0xsmall",
+                slug="small",
+                question="Small?",
+                active=True,
+            ),
+            TraderRanking(
+                wallet_address="0xaaa",
+                rank=1,
+                pnl=100,
+                volume=100,
+                time_period="ALL",
+                category="OVERALL",
+                captured_at=captured_at,
+            ),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xlarge",
+                outcome="Yes",
+                size=100,
+                value_usd=Decimal("500000.00"),
+                captured_at=captured_at,
+            ),
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xsmall",
+                outcome="Yes",
+                size=1,
+                value_usd=Decimal("50.00"),
+                captured_at=captured_at,
+            ),
+        ]
+    )
+    db_session.flush()
+
+    calculate_smart_money_scores(
+        db_session, top_n=300, category="OVERALL", time_period="ALL"
+    )
+
+    yes_scores = {
+        row.condition_id: row.score
+        for row in db_session.query(SmartMoneyScore).filter_by(outcome="Yes").all()
+    }
+    assert yes_scores == {
+        "0xlarge": Decimal("100.00"),
+        "0xsmall": Decimal("0.01"),
+    }
+
+
+@pytest.mark.parametrize("missing_source", ["rankings", "positions"])
+def test_persists_zero_coverage_when_a_source_snapshot_is_missing(
+    db_session, missing_source
+):
+    captured_at = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    db_session.add(
+        Market(
+            condition_id="0xmarket",
+            slug="market",
+            question="Will it happen?",
+            active=True,
+        )
+    )
+    if missing_source == "rankings":
+        db_session.add(
+            Position(
+                wallet_address="0xaaa",
+                condition_id="0xmarket",
+                outcome="Yes",
+                size=10,
+                value_usd=Decimal("500.00"),
+                captured_at=captured_at,
+            )
+        )
+    else:
+        db_session.add(
+            TraderRanking(
+                wallet_address="0xaaa",
+                rank=1,
+                pnl=100,
+                volume=100,
+                time_period="ALL",
+                category="OVERALL",
+                captured_at=captured_at,
+            )
+        )
+    db_session.flush()
+
+    count = calculate_smart_money_scores(
+        db_session, top_n=300, category="OVERALL", time_period="ALL"
+    )
+
+    assert count == 2
+    scores = db_session.query(SmartMoneyScore).all()
+    assert all(row.capital_usd == Decimal("0.00") for row in scores)
+    assert all(row.score == Decimal("0.00") for row in scores)
+    assert all(row.has_coverage is False for row in scores)
+    assert all(row.trader_count == 0 for row in scores)

@@ -53,6 +53,10 @@ def calculate_smart_money_scores(
         }
 
     markets = session.scalars(select(Market).where(Market.active.is_(True))).all()
+    max_capital = max(
+        (capital for capital, _ in aggregates.values()),
+        default=Decimal("0.00"),
+    )
     captured_at = datetime.now(timezone.utc)
     scores = []
     for market in markets:
@@ -66,7 +70,13 @@ def calculate_smart_money_scores(
                     condition_id=market.condition_id,
                     outcome=outcome,
                     capital_usd=capital,
-                    score=Decimal("100.00") if capital > 0 else Decimal("0.00"),
+                    score=(
+                        ((capital / max_capital) * Decimal("100")).quantize(
+                            Decimal("0.01")
+                        )
+                        if max_capital > 0
+                        else Decimal("0.00")
+                    ),
                     has_coverage=capital > 0,
                     trader_count=trader_count,
                     captured_at=captured_at,
