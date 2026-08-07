@@ -29,7 +29,9 @@ def test_ingest_positions_for_top_traders_stores_positions_for_known_wallets(db_
     raw_position = {"conditionId": "0xabc", "outcome": "Yes", "size": 1200.0, "currentValue": 540.0}
     client = FakeDataApiClient(positions_by_wallet={"0x111": [raw_position]})
 
-    count = ingest_positions_for_top_traders(db_session, client)
+    count = ingest_positions_for_top_traders(
+        db_session, client, top_n=300, category="OVERALL", time_period="ALL"
+    )
 
     assert count == 1
     position = db_session.query(Position).one()
@@ -53,7 +55,54 @@ def test_ingest_positions_skips_wallets_with_no_positions(db_session):
 
     client = FakeDataApiClient(positions_by_wallet={})
 
-    count = ingest_positions_for_top_traders(db_session, client)
+    count = ingest_positions_for_top_traders(
+        db_session, client, top_n=300, category="OVERALL", time_period="ALL"
+    )
 
     assert count == 0
     assert db_session.query(Position).count() == 0
+
+
+def test_ingest_positions_excludes_wallets_from_older_snapshot(db_session):
+    older_captured_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    newer_captured_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    db_session.add(
+        TraderRanking(
+            wallet_address="0xold",
+            rank=1,
+            pnl=999999.0,
+            volume=999999.0,
+            time_period="ALL",
+            category="OVERALL",
+            captured_at=older_captured_at,
+        )
+    )
+    db_session.add(
+        TraderRanking(
+            wallet_address="0xnew",
+            rank=1,
+            pnl=500000.0,
+            volume=2000000.0,
+            time_period="ALL",
+            category="OVERALL",
+            captured_at=newer_captured_at,
+        )
+    )
+    db_session.flush()
+
+    raw_position = {"conditionId": "0xabc", "outcome": "Yes", "size": 1200.0, "currentValue": 540.0}
+    client = FakeDataApiClient(
+        positions_by_wallet={
+            "0xold": [raw_position],
+            "0xnew": [raw_position],
+        }
+    )
+
+    count = ingest_positions_for_top_traders(
+        db_session, client, top_n=300, category="OVERALL", time_period="ALL"
+    )
+
+    assert count == 1
+    position = db_session.query(Position).one()
+    assert position.wallet_address == "0xnew"

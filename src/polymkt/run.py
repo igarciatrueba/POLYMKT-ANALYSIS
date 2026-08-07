@@ -39,7 +39,13 @@ def run_position_ingestion() -> None:
     client = DataApiClient(base_url=settings.data_api_base_url)
     try:
         with get_session() as session:
-            ingest_positions_for_top_traders(session, client)
+            ingest_positions_for_top_traders(
+                session,
+                client,
+                top_n=settings.top_n_traders,
+                category=settings.leaderboard_category,
+                time_period=settings.leaderboard_time_period,
+            )
     finally:
         client.close()
 
